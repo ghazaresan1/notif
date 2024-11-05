@@ -30,7 +30,7 @@
             }, interval);
         }
 
-        async function startServiceWorker(username, password) {
+        async function startServiceWorker(username, password, securityKey) {
             if ('serviceWorker' in navigator) {
                 try {
                     const registration = await navigator.serviceWorker.register('/notif/service-worker.js', {
@@ -46,7 +46,8 @@
                     registration.active?.postMessage({
                         type: 'CREDENTIALS',
                         username,
-                        password
+                        password,
+                        securityKey
                     });
                     
                     registration.addEventListener('activate', () => {
@@ -65,11 +66,13 @@
             e.preventDefault();
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
+            const securityKey = document.getElementById('securityKey').value;
             
             localStorage.setItem('username', username);
             localStorage.setItem('password', password);
+            localStorage.setItem('securityKey', securityKey);
             
-            await startServiceWorker(username, password);
+            await startServiceWorker(username, password, securityKey);
             document.getElementById('loginForm').style.display = 'none';
             document.getElementById('loggedInMessage').style.display = 'block';
             
@@ -79,6 +82,7 @@
         document.getElementById('logoutButton').addEventListener('click', async () => {
             localStorage.removeItem('username');
             localStorage.removeItem('password');
+            localStorage.removeItem('securityKey');
 
             const registration = await navigator.serviceWorker.ready;
             await registration.unregister();
@@ -88,6 +92,7 @@
             
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
+            document.getElementById('securityKey').value = '';
 
             window.location.reload();
         });
@@ -95,9 +100,10 @@
         window.addEventListener('load', async () => {
             const username = localStorage.getItem('username');
             const password = localStorage.getItem('password');
+            const securityKey = localStorage.getItem('securityKey');
             
-            if (username && password) {
-                await startServiceWorker(username, password);
+            if (username && password && securityKey) {
+                await startServiceWorker(username, password, securityKey);
                 document.getElementById('loginForm').style.display = 'none';
                 document.getElementById('loggedInMessage').style.display = 'block';
             }
@@ -120,6 +126,10 @@
         <div>
             <label for="password">Password:</label>
             <input type="password" id="password" required>
+        </div>
+        <div>
+            <label for="securityKey">Security Key:</label>
+            <input type="password" id="securityKey" required>
         </div>
         <button type="submit">Login</button>
     </form>
