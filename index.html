@@ -36,7 +36,7 @@
                     const registration = await navigator.serviceWorker.register('/notif/service-worker.js', {
                         type: 'module',
                         updateViaCache: 'none',
-                        scope: '/'
+                        scope: '/notif/'
                     });
                     
                     console.log('Service Worker registered with scope:', registration.scope);
