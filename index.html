@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My PWA</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+    <meta name="theme-color" content="#4A90E2">
+    <link rel="apple-touch-icon" href="icon-192x192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="description" content="Restaurant Order Management PWA">
+    <meta name="apple-mobile-web-app-title" content="Restaurant Orders">
+    <meta name="application-name" content="Restaurant Orders">
+    <link rel="icon" type="image/png" sizes="32x32" href="icon-32x32.png">
+    
+    <script type="module">
+        const KEEP_ALIVE_PING = 'keep-alive';
+        
+        function keepAlive() {
+            const interval = 20000;
+            setInterval(() => {
+                if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({
+                        type: 'KEEP_ALIVE'
+                    });
+                }
+            }, interval);
+        }
+
+        async function startServiceWorker(username, password) {
+            if ('serviceWorker' in navigator) {
+                try {
+                    const registration = await navigator.serviceWorker.register('service-worker.js', {
+                        type: 'module',
+                        updateViaCache: 'none',
+                        scope: '/'
+                    });
+                    
+                    console.log('Service Worker registered with scope:', registration.scope);
+                    
+                    await navigator.serviceWorker.ready;
+                    
+                    registration.active?.postMessage({
+                        type: 'CREDENTIALS',
+                        username,
+                        password
+                    });
+                    
+                    registration.addEventListener('activate', () => {
+                        registration.active.postMessage({type: KEEP_ALIVE_PING});
+                    });
+
+                    keepAlive();
+                    
+                } catch (error) {
+                    console.error('Service Worker registration failed:', error);
+                }
+            }
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            localStorage.setItem('username', username);
+            localStorage.setItem('password', password);
+            
+            await startServiceWorker(username, password);
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('loggedInMessage').style.display = 'block';
+            
+            window.location.reload();
+        });
+
+        document.getElementById('logoutButton').addEventListener('click', async () => {
+            localStorage.removeItem('username');
+            localStorage.removeItem('password');
+
+            const registration = await navigator.serviceWorker.ready;
+            await registration.unregister();
+
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('loggedInMessage').style.display = 'none';
+            
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+
+            window.location.reload();
+        });
+
+        window.addEventListener('load', async () => {
+            const username = localStorage.getItem('username');
+            const password = localStorage.getItem('password');
+            
+            if (username && password) {
+                await startServiceWorker(username, password);
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('loggedInMessage').style.display = 'block';
+            }
+
+            if ('Notification' in window) {
+                const permission = await Notification.requestPermission();
+                console.log('Notification permission:', permission);
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Restaurant Order Management</h1>
+    
+    <form id="loginForm">
+        <div>
+            <label for="username">Username:</label>
+            <input type="text" id="username" required>
+        </div>
+        <div>
+            <label for="password">Password:</label>
+            <input type="password" id="password" required>
+        </div>
+        <button type="submit">Login</button>
+    </form>
+
+    <div id="loggedInMessage" style="display: none;">
+        <p>Successfully logged in! The app is running in the background.</p>
+        <button id="logoutButton">Logout</button>
+    </div>
+</body>
+</html>
