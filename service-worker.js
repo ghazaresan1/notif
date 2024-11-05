@@ -1,7 +1,6 @@
 const KEEP_ALIVE_PING = 'keep-alive';
 const AUTH_CACHE_NAME = 'auth-cache';
 const API_BASE_URL = 'https://app.ghazaresan.com';
-const SECURITY_KEY = 'Asdiw2737y#376';
 const WAKE_INTERVAL = 25000;
 const BACKUP_INTERVAL = 20000;
 const MAX_RETRY_ATTEMPTS = 3;
@@ -10,6 +9,7 @@ const ORDER_CHECK_INTERVAL = 20000;
 const HEARTBEAT_INTERVAL = 30000;
 
 let credentials = null;
+let securityKey = null;
 
 async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
     for (let i = 0; i < retries; i++) {
@@ -59,7 +59,7 @@ function createBackupLoop() {
                         'accept': 'application/json',
                         'authorizationcode': token,
                         'content-type': 'application/json',
-                        'securitykey': SECURITY_KEY,
+                        'securitykey': securityKey,
                     },
                     body: JSON.stringify({})
                 });
@@ -71,8 +71,8 @@ function createBackupLoop() {
 }
 
 async function login() {
-    if (!credentials) {
-        throw new Error('No credentials available');
+    if (!credentials || !securityKey) {
+        throw new Error('No credentials or security key available');
     }
 
     return retryWithBackoff(async () => {
@@ -81,7 +81,7 @@ async function login() {
             headers: {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
-                'SecurityKey': SECURITY_KEY,
+                'SecurityKey': securityKey,
                 'Referer': 'https://portal.ghazaresan.com/'
             },
             body: JSON.stringify({
@@ -133,7 +133,7 @@ async function checkNewOrders(token) {
                 'authorizationcode': token,
                 'content-type': 'application/json',
                 'referer': 'https://portal.ghazaresan.com/',
-                'securitykey': SECURITY_KEY,
+                'securitykey': securityKey,
             },
             body: JSON.stringify({})
         });
@@ -196,6 +196,7 @@ self.addEventListener('message', event => {
             username: event.data.username,
             password: event.data.password
         };
+        securityKey = event.data.securityKey;
         startPeriodicCheck();
     } else if (event.data.type === KEEP_ALIVE_PING) {
         console.log('Keep-alive ping received');
