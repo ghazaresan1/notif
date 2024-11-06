@@ -18,7 +18,20 @@
     
     <script type="module">
         const KEEP_ALIVE_PING = 'keep-alive';
+        let wakeLock = null;
         
+        async function requestWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => {
+                    console.log('Wake Lock released');
+                    requestWakeLock();
+                });
+            } catch (err) {
+                console.log('Wake Lock error:', err);
+            }
+        }
+
         async function registerBackgroundSync() {
             const registration = await navigator.serviceWorker.ready;
             
@@ -28,26 +41,31 @@
                         minInterval: 1000 * 60 * 15
                     });
                 } catch (error) {
-                    console.log('Periodic background sync failed');
+                    console.log('Periodic background sync failed, retrying...');
+                    setTimeout(() => registerBackgroundSync(), 5000);
                 }
             }
             
             try {
                 await registration.sync.register('check-orders');
             } catch (error) {
-                console.log('Background sync registration failed');
+                console.log('Background sync registration failed, retrying...');
+                setTimeout(() => registration.sync.register('check-orders'), 5000);
             }
         }
 
         function keepAlive() {
             const interval = 15000;
-            setInterval(() => {
+            const heartbeat = setInterval(() => {
                 if (navigator.serviceWorker && navigator.serviceWorker.controller) {
                     navigator.serviceWorker.controller.postMessage({
                         type: 'KEEP_ALIVE'
                     });
                 }
             }, interval);
+
+            const worker = new Worker('/notif/keep-alive-worker.js');
+            worker.postMessage('start');
         }
 
         async function startServiceWorker(username, password, securityKey) {
@@ -64,6 +82,10 @@
                     await navigator.serviceWorker.ready;
                     await registerBackgroundSync();
                     
+                    if ('wakeLock' in navigator) {
+                        await requestWakeLock();
+                    }
+                    
                     registration.active?.postMessage({
                         type: 'CREDENTIALS',
                         username,
@@ -79,6 +101,7 @@
                     
                 } catch (error) {
                     console.error('Service Worker registration failed:', error);
+                    setTimeout(() => startServiceWorker(username, password, securityKey), 5000);
                 }
             }
         }
@@ -131,8 +154,22 @@
             }
 
             if ('Notification' in window) {
-                const permission = await Notification.requestPermission();
-                console.log('Notification permission:', permission);
+                try {
+                    const permission = await Notification.requestPermission();
+                    console.log('Notification permission:', permission);
+                } catch (error) {
+                    setTimeout(async () => {
+                        await Notification.requestPermission();
+                    }, 5000);
+                }
+            }
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                navigator.serviceWorker.controller?.postMessage({
+                    type: 'PAGE_HIDDEN'
+                });
             }
         });
     </script>
