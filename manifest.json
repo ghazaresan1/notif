@@ -1,6 +1,6 @@
 {
-    "name": "My PWA",
-    "short_name": "PWA",
+    "name": "ghazaresan",
+    "short_name": "ghazaresan",
     "start_url": "/notif/",
     "display": "standalone",
     "background_color": "#ffffff",
@@ -18,7 +18,8 @@
             "type": "image/png"
         }
     ],
+    "permissions": ["wake-lock"],
     "orientation": "portrait",
-    "scope": "/",
+    "scope": "/notif/",
     "version": "1.0"
 }
