@@ -7,9 +7,19 @@ const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY = 5000;
 const ORDER_CHECK_INTERVAL = 20000;
 const HEARTBEAT_INTERVAL = 30000;
+const PING_INTERVAL = 15000;
 
 let credentials = null;
 let securityKey = null;
+let isChecking = false;
+
+function enhancedKeepAlive() {
+    setInterval(async () => {
+        const cache = await caches.open(AUTH_CACHE_NAME);
+        await cache.put('keepalive', new Response(Date.now().toString()));
+        self.registration.active?.postMessage({ type: 'HEARTBEAT' });
+    }, PING_INTERVAL);
+}
 
 async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
     for (let i = 0; i < retries; i++) {
@@ -71,8 +81,8 @@ function createBackupLoop() {
 }
 
 async function login() {
-    if (!credentials || !securityKey) {
-        throw new Error('No credentials or security key available');
+    if (!credentials?.username || !credentials?.password) {
+        throw new Error('Invalid credentials format');
     }
 
     return retryWithBackoff(async () => {
@@ -125,31 +135,38 @@ async function showNewOrderNotification(orderCount) {
 }
 
 async function checkNewOrders(token) {
-    return retryWithBackoff(async () => {
-        const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
-            method: 'POST',
-            headers: {
-                'accept': 'application/json',
-                'authorizationcode': token,
-                'content-type': 'application/json',
-                'referer': 'https://portal.ghazaresan.com/',
-                'securitykey': securityKey,
-            },
-            body: JSON.stringify({})
-        });
+    if (isChecking) return;
+    isChecking = true;
+    
+    try {
+        return await retryWithBackoff(async () => {
+            const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
+                method: 'POST',
+                headers: {
+                    'accept': 'application/json',
+                    'authorizationcode': token,
+                    'content-type': 'application/json',
+                    'referer': 'https://portal.ghazaresan.com/',
+                    'securitykey': securityKey,
+                },
+                body: JSON.stringify({})
+            });
 
-        const responseData = await response.json();
-        console.log('Order check completed successfully');
-        
-        if (Array.isArray(responseData)) {
-            const newOrders = responseData.filter(order => order.Status === 0);
-            if (newOrders.length > 0) {
-                await showNewOrderNotification(newOrders.length);
+            const responseData = await response.json();
+            console.log('Order check completed successfully');
+            
+            if (Array.isArray(responseData)) {
+                const newOrders = responseData.filter(order => order.Status === 0);
+                if (newOrders.length > 0) {
+                    await showNewOrderNotification(newOrders.length);
+                }
             }
-        }
-        
-        return responseData;
-    });
+            
+            return responseData;
+        });
+    } finally {
+        isChecking = false;
+    }
 }
 
 async function startPeriodicCheck() {
@@ -187,6 +204,7 @@ self.addEventListener('activate', event => {
         await clients.claim();
         createWakeLoop();
         createBackupLoop();
+        enhancedKeepAlive();
     })());
 });
 
@@ -208,6 +226,12 @@ self.addEventListener('notificationclick', event => {
     event.waitUntil(
         clients.openWindow('https://portal.ghazaresan.com/orderlist')
     );
+});
+
+self.addEventListener('periodicsync', event => {
+    if (event.tag === 'order-sync') {
+        event.waitUntil(startPeriodicCheck());
+    }
 });
 
 setInterval(() => {
