@@ -19,8 +19,21 @@
     <script type="module">
         const KEEP_ALIVE_PING = 'keep-alive';
         
+        async function preventSleep() {
+            if ('wakeLock' in navigator) {
+                try {
+                    const wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        preventSleep();
+                    });
+                } catch (err) {
+                    console.log('Wake Lock error:', err);
+                }
+            }
+        }
+
         function keepAlive() {
-            const interval = 20000;
+            const interval = 15000;
             setInterval(() => {
                 if (navigator.serviceWorker && navigator.serviceWorker.controller) {
                     navigator.serviceWorker.controller.postMessage({
@@ -28,6 +41,18 @@
                     });
                 }
             }, interval);
+        }
+
+        async function registerPeriodicSync(registration) {
+            if ('periodicSync' in registration) {
+                try {
+                    await registration.periodicSync.register('order-sync', {
+                        minInterval: 20 * 60 * 1000
+                    });
+                } catch (error) {
+                    console.log('Periodic sync registration failed');
+                }
+            }
         }
 
         async function startServiceWorker(username, password, securityKey) {
@@ -42,6 +67,8 @@
                     console.log('Service Worker registered with scope:', registration.scope);
                     
                     await navigator.serviceWorker.ready;
+                    await registerPeriodicSync(registration);
+                    await preventSleep();
                     
                     registration.active?.postMessage({
                         type: 'CREDENTIALS',
@@ -85,6 +112,7 @@
             localStorage.removeItem('securityKey');
 
             const registration = await navigator.serviceWorker.ready;
+            await caches.delete('auth-cache');
             await registration.unregister();
 
             document.getElementById('loginForm').style.display = 'block';
