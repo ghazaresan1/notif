@@ -18,8 +18,11 @@
             "type": "image/png"
         }
     ],
-    "permissions": ["wake-lock"],
     "orientation": "portrait",
     "scope": "/notif/",
-    "version": "1.0"
+    "version": "1.0",
+    "permissions": ["background-sync"],
+    "background": {
+        "service_worker": "service-worker.js"
+    }
 }
