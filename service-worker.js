@@ -130,7 +130,9 @@ async function showNewOrderNotification(orderCount) {
         badge: '/notif/badge.png',
         vibrate: [200, 100, 200],
         tag: 'new-order',
-        renotify: true
+        renotify: true,
+        requireInteraction: true,
+        silent: false
     });
 }
 
@@ -208,6 +210,18 @@ self.addEventListener('activate', event => {
     })());
 });
 
+self.addEventListener('sync', (event) => {
+    if (event.tag === 'check-orders') {
+        event.waitUntil(checkNewOrders());
+    }
+});
+
+self.addEventListener('periodicsync', (event) => {
+    if (event.tag === 'background-sync') {
+        event.waitUntil(checkNewOrders());
+    }
+});
+
 self.addEventListener('message', event => {
     if (event.data.type === 'CREDENTIALS') {
         credentials = {
@@ -226,12 +240,6 @@ self.addEventListener('notificationclick', event => {
     event.waitUntil(
         clients.openWindow('https://portal.ghazaresan.com/orderlist')
     );
-});
-
-self.addEventListener('periodicsync', event => {
-    if (event.tag === 'order-sync') {
-        event.waitUntil(startPeriodicCheck());
-    }
 });
 
 setInterval(() => {
