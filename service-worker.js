@@ -126,8 +126,8 @@ async function login() {
 async function showNewOrderNotification(orderCount) {
     await self.registration.showNotification('سفارش جدید', {
         body: 'یک سفارش جدید در انتظار تایید دارید',
-        icon: '/icon.png',
-        badge: '/badge.png',
+        icon: '/notif/icon.png',
+        badge: '/notif/badge.png',
         vibrate: [200, 100, 200],
         tag: 'new-order',
         renotify: true
