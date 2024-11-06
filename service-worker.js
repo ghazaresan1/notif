@@ -8,17 +8,58 @@ const RETRY_DELAY = 5000;
 const ORDER_CHECK_INTERVAL = 20000;
 const HEARTBEAT_INTERVAL = 30000;
 const PING_INTERVAL = 15000;
+const WATCHDOG_INTERVAL = 45000;
+const HEALTH_CHECK_INTERVAL = 35000;
 
 let credentials = null;
 let securityKey = null;
 let isChecking = false;
+
+function startWatchdog() {
+    setInterval(async () => {
+        const cache = await caches.open(AUTH_CACHE_NAME);
+        const lastPing = await cache.match('last-ping');
+        if (lastPing) {
+            const pingTime = parseInt(await lastPing.text());
+            if (Date.now() - pingTime > WATCHDOG_INTERVAL) {
+                await startPeriodicCheck();
+            }
+        }
+        await cache.put('last-ping', new Response(Date.now().toString()));
+    }, WATCHDOG_INTERVAL);
+}
 
 function enhancedKeepAlive() {
     setInterval(async () => {
         const cache = await caches.open(AUTH_CACHE_NAME);
         await cache.put('keepalive', new Response(Date.now().toString()));
         self.registration.active?.postMessage({ type: 'HEARTBEAT' });
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/health`, {
+                method: 'GET',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
+            if (!response.ok) {
+                await startPeriodicCheck();
+            }
+        } catch (error) {
+            console.log('Health check failed, restarting services...');
+            await startPeriodicCheck();
+        }
     }, PING_INTERVAL);
+}
+function ensurePersistentOperation() {
+    if ('wakeLock' in navigator) {
+        setInterval(async () => {
+            try {
+                const wakeLock = await navigator.wakeLock.request('screen');
+                setTimeout(() => wakeLock.release(), 500);
+            } catch (err) {
+                console.log('Wake lock request failed');
+            }
+        }, HEALTH_CHECK_INTERVAL);
+    }
 }
 
 async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
@@ -207,6 +248,8 @@ self.addEventListener('activate', event => {
         createWakeLoop();
         createBackupLoop();
         enhancedKeepAlive();
+        startWatchdog();
+        ensurePersistentOperation();
     })());
 });
 
