@@ -18,7 +18,7 @@
             "type": "image/png"
         }
     ],
-    "permissions": ["wake-lock"],
+    "permissions": "wake-lock",
     "orientation": "portrait",
     "scope": "/notif/",
     "version": "1.0"
