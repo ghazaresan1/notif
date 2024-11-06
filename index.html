@@ -19,18 +19,25 @@
     <script type="module">
         const KEEP_ALIVE_PING = 'keep-alive';
         
-        async function preventSleep() {
-            if ('wakeLock' in navigator) {
-                try {
-                    const wakeLock = await navigator.wakeLock.request('screen');
-                    wakeLock.addEventListener('release', () => {
-                        preventSleep();
-                    });
-                } catch (err) {
-                    console.log('Wake Lock error:', err);
-                }
+       async function preventSleep() {
+    if ('wakeLock' in navigator) {
+        try {
+            // Only request wake lock when document is visible
+            if (document.visibilityState === 'visible') {
+                const wakeLock = await navigator.wakeLock.request('screen');
+                
+                // Re-request wake lock when page becomes visible again
+                document.addEventListener('visibilitychange', async () => {
+                    if (document.visibilityState === 'visible') {
+                        await preventSleep();
+                    }
+                });
             }
+        } catch (err) {
+            console.log('Wake Lock status:', err);
         }
+    }
+}
 
         function keepAlive() {
             const interval = 15000;
