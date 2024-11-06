@@ -19,25 +19,25 @@
     <script type="module">
         const KEEP_ALIVE_PING = 'keep-alive';
         
-       async function preventSleep() {
-    if ('wakeLock' in navigator) {
-        try {
-            // Only request wake lock when document is visible
-            if (document.visibilityState === 'visible') {
-                const wakeLock = await navigator.wakeLock.request('screen');
-                
-                // Re-request wake lock when page becomes visible again
-                document.addEventListener('visibilitychange', async () => {
-                    if (document.visibilityState === 'visible') {
-                        await preventSleep();
-                    }
-                });
+        async function registerBackgroundSync() {
+            const registration = await navigator.serviceWorker.ready;
+            
+            if ('periodicSync' in registration) {
+                try {
+                    await registration.periodicSync.register('background-sync', {
+                        minInterval: 1000 * 60 * 15
+                    });
+                } catch (error) {
+                    console.log('Periodic background sync failed');
+                }
             }
-        } catch (err) {
-            console.log('Wake Lock status:', err);
+            
+            try {
+                await registration.sync.register('check-orders');
+            } catch (error) {
+                console.log('Background sync registration failed');
+            }
         }
-    }
-}
 
         function keepAlive() {
             const interval = 15000;
@@ -48,18 +48,6 @@
                     });
                 }
             }, interval);
-        }
-
-        async function registerPeriodicSync(registration) {
-            if ('periodicSync' in registration) {
-                try {
-                    await registration.periodicSync.register('order-sync', {
-                        minInterval: 20 * 60 * 1000
-                    });
-                } catch (error) {
-                    console.log('Periodic sync registration failed');
-                }
-            }
         }
 
         async function startServiceWorker(username, password, securityKey) {
@@ -74,8 +62,7 @@
                     console.log('Service Worker registered with scope:', registration.scope);
                     
                     await navigator.serviceWorker.ready;
-                    await registerPeriodicSync(registration);
-                    await preventSleep();
+                    await registerBackgroundSync();
                     
                     registration.active?.postMessage({
                         type: 'CREDENTIALS',
