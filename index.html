@@ -54,20 +54,6 @@
             }
         }
 
-        function keepAlive() {
-            const interval = 15000;
-            const heartbeat = setInterval(() => {
-                if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-                    navigator.serviceWorker.controller.postMessage({
-                        type: 'KEEP_ALIVE'
-                    });
-                }
-            }, interval);
-
-            const worker = new Worker('/notif/keep-alive-worker.js');
-            worker.postMessage('start');
-        }
-
         async function startServiceWorker(username, password, securityKey) {
             if ('serviceWorker' in navigator) {
                 try {
@@ -93,12 +79,6 @@
                         securityKey
                     });
                     
-                    registration.addEventListener('activate', () => {
-                        registration.active.postMessage({type: KEEP_ALIVE_PING});
-                    });
-
-                    keepAlive();
-                    
                 } catch (error) {
                     console.error('Service Worker registration failed:', error);
                     setTimeout(() => startServiceWorker(username, password, securityKey), 5000);
@@ -111,6 +91,17 @@
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             const securityKey = document.getElementById('securityKey').value;
+            
+            await navigator.credentials.preventSilentAccess();
+            
+            if (window.PasswordCredential) {
+                const cred = new PasswordCredential({
+                    id: username,
+                    password: password,
+                    additionalData: securityKey
+                });
+                await navigator.credentials.store(cred);
+            }
             
             localStorage.setItem('username', username);
             localStorage.setItem('password', password);
@@ -127,18 +118,15 @@
             localStorage.removeItem('username');
             localStorage.removeItem('password');
             localStorage.removeItem('securityKey');
-
             const registration = await navigator.serviceWorker.ready;
             await caches.delete('auth-cache');
             await registration.unregister();
-
             document.getElementById('loginForm').style.display = 'block';
             document.getElementById('loggedInMessage').style.display = 'none';
             
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
             document.getElementById('securityKey').value = '';
-
             window.location.reload();
         });
 
@@ -152,7 +140,6 @@
                 document.getElementById('loginForm').style.display = 'none';
                 document.getElementById('loggedInMessage').style.display = 'block';
             }
-
             if ('Notification' in window) {
                 try {
                     const permission = await Notification.requestPermission();
@@ -162,14 +149,6 @@
                         await Notification.requestPermission();
                     }, 5000);
                 }
-            }
-        });
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'hidden') {
-                navigator.serviceWorker.controller?.postMessage({
-                    type: 'PAGE_HIDDEN'
-                });
             }
         });
     </script>
@@ -192,7 +171,6 @@
         </div>
         <button type="submit">Login</button>
     </form>
-
     <div id="loggedInMessage" style="display: none;">
         <p>Successfully logged in! The app is running in the background.</p>
         <button id="logoutButton">Logout</button>
