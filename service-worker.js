@@ -14,6 +14,48 @@ const HEALTH_CHECK_INTERVAL = 35000;
 let credentials = null;
 let securityKey = null;
 let isChecking = false;
+let wakeLock = null;
+
+// Wake Lock Manager
+class WakeLockManager {
+    constructor() {
+        this.wakeLock = null;
+        this.isActive = false;
+        this.startWakeLockLoop();
+    }
+
+    startWakeLockLoop() {
+        setInterval(() => {
+            this.acquire();
+        }, 20000);
+    }
+
+    async acquire() {
+        if (!this.isActive && 'wakeLock' in navigator) {
+            try {
+                this.wakeLock = await navigator.wakeLock.request('screen');
+                this.isActive = true;
+                this.wakeLock.addEventListener('release', () => {
+                    this.isActive = false;
+                    this.acquire();
+                });
+            } catch (err) {
+                console.log('Wake Lock error:', err);
+                setTimeout(() => this.acquire(), 5000);
+            }
+        }
+    }
+}
+
+// Keep Alive Worker functionality
+function startKeepAlive() {
+    setInterval(() => {
+        fetch('/api/ping', {
+            method: 'POST',
+            keepalive: true
+        }).catch(err => console.log('Keep alive ping failed:', err));
+    }, 20000);
+}
 
 function startWatchdog() {
     setInterval(async () => {
@@ -49,17 +91,10 @@ function enhancedKeepAlive() {
         }
     }, PING_INTERVAL);
 }
+
 function ensurePersistentOperation() {
-    if ('wakeLock' in navigator) {
-        setInterval(async () => {
-            try {
-                const wakeLock = await navigator.wakeLock.request('screen');
-                setTimeout(() => wakeLock.release(), 500);
-            } catch (err) {
-                console.log('Wake lock request failed');
-            }
-        }, HEALTH_CHECK_INTERVAL);
-    }
+    const wakeLockManager = new WakeLockManager();
+    wakeLockManager.acquire();
 }
 
 async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
@@ -84,7 +119,6 @@ function verifyServiceWorkerActive() {
         }
         
         self.registration.active?.postMessage({ type: 'HEARTBEAT' });
-        console.log('Service Worker heartbeat sent');
     }, HEARTBEAT_INTERVAL);
 }
 
@@ -125,7 +159,6 @@ async function login() {
     if (!credentials?.username || !credentials?.password) {
         throw new Error('Invalid credentials format');
     }
-
     return retryWithBackoff(async () => {
         const response = await fetch(`${API_BASE_URL}/api/Authorization/Authenticate`, {
             method: 'POST',
@@ -140,17 +173,14 @@ async function login() {
                 Password: credentials.password
             })
         });
-
         if (!response.ok) {
             throw new Error(`Login failed with status: ${response.status}`);
         }
-
         const data = await response.json();
         
         if (!data.Token) {
             throw new Error('No token received in response');
         }
-
         const cache = await caches.open(AUTH_CACHE_NAME);
         await Promise.all([
             cache.put('auth-token', new Response(data.Token)),
@@ -159,7 +189,6 @@ async function login() {
                 canEditMenu: data.CanEditMenu
             })))
         ]);
-
         return data.Token;
     });
 }
@@ -194,9 +223,7 @@ async function checkNewOrders(token) {
                 },
                 body: JSON.stringify({})
             });
-
             const responseData = await response.json();
-            console.log('Order check completed successfully');
             
             if (Array.isArray(responseData)) {
                 const newOrders = responseData.filter(order => order.Status === 0);
@@ -250,6 +277,7 @@ self.addEventListener('activate', event => {
         enhancedKeepAlive();
         startWatchdog();
         ensurePersistentOperation();
+        startKeepAlive();
     })());
 });
 
