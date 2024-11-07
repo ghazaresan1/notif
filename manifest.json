@@ -33,6 +33,13 @@
         "service_worker": "service-worker.js",
         "persistent": true
     },
+    "background_fetch": {
+        "enable": true
+    },
+    "periodic_sync": {
+        "enable": true,
+        "min_interval": 60
+    },
     "categories": ["business", "productivity"],
     "prefer_related_applications": false
 }
