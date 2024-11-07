@@ -15,6 +15,7 @@ let credentials = null;
 let securityKey = null;
 let isChecking = false;
 let wakeLock = null;
+let networkRetryTimeout;
 
 // Wake Lock Manager
 class WakeLockManager {
@@ -238,6 +239,20 @@ async function checkNewOrders(token) {
         isChecking = false;
     }
 }
+function handleNetworkChange() {
+    self.addEventListener('online', () => {
+        console.log('Network connection restored');
+        clearTimeout(networkRetryTimeout);
+        startPeriodicCheck();
+    });
+
+    self.addEventListener('offline', () => {
+        console.log('Network connection lost');
+        networkRetryTimeout = setTimeout(() => {
+            startPeriodicCheck();
+        }, 5000);
+    });
+}
 
 async function startPeriodicCheck() {
     try {
@@ -246,18 +261,21 @@ async function startPeriodicCheck() {
         
         const checkInterval = 20000;
         const periodicCheck = async () => {
-            try {
-                await checkNewOrders(token);
-            } catch (error) {
-                console.log('Check failed, retrying with new token...');
-                const newToken = await login();
-                await checkNewOrders(newToken);
+            if (navigator.onLine) {
+                try {
+                    await checkNewOrders(token);
+                } catch (error) {
+                    console.log('Check failed, retrying with new token...');
+                    const newToken = await login();
+                    await checkNewOrders(newToken);
+                }
             }
             setTimeout(periodicCheck, checkInterval);
         };
         
         periodicCheck();
         verifyServiceWorkerActive();
+        handleNetworkChange();
     } catch (error) {
         console.log('Service Worker check failed, restarting...');
         setTimeout(startPeriodicCheck, 5000);
