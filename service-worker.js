@@ -1,3 +1,17 @@
+// Network event handlers at the top level
+self.addEventListener('online', () => {
+    console.log('Network connection restored');
+    clearTimeout(networkRetryTimeout);
+    startPeriodicCheck();
+});
+
+self.addEventListener('offline', () => {
+    console.log('Network connection lost');
+    networkRetryTimeout = setTimeout(() => {
+        startPeriodicCheck();
+    }, 5000);
+});
+
 const KEEP_ALIVE_PING = 'keep-alive';
 const AUTH_CACHE_NAME = 'auth-cache';
 const API_BASE_URL = 'https://app.ghazaresan.com';
@@ -17,7 +31,6 @@ let isChecking = false;
 let wakeLock = null;
 let networkRetryTimeout;
 
-// Wake Lock Manager
 class WakeLockManager {
     constructor() {
         this.wakeLock = null;
@@ -48,7 +61,6 @@ class WakeLockManager {
     }
 }
 
-// Keep Alive Worker functionality
 function startKeepAlive() {
     setInterval(() => {
         fetch('/api/ping', {
@@ -106,6 +118,36 @@ async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
             if (i === retries - 1) throw error;
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, i)));
         }
+    }
+}
+
+async function verifyCredentials() {
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    const tokenResponse = await cache.match('auth-token');
+    
+    if (!tokenResponse) {
+        console.log('Token missing, attempting relogin');
+        await login();
+        return;
+    }
+
+    try {
+        const token = await tokenResponse.text();
+        const response = await fetch(`${API_BASE_URL}/api/Authorization/Verify`, {
+            method: 'GET',
+            headers: {
+                'Authorization': token,
+                'SecurityKey': securityKey
+            }
+        });
+        
+        if (!response.ok) {
+            console.log('Token invalid, refreshing login');
+            await login();
+        }
+    } catch (error) {
+        console.log('Verification failed, attempting relogin');
+        await login();
     }
 }
 
@@ -239,35 +281,31 @@ async function checkNewOrders(token) {
         isChecking = false;
     }
 }
-function handleNetworkChange() {
-    self.addEventListener('online', () => {
-        console.log('Network connection restored');
-        clearTimeout(networkRetryTimeout);
-        startPeriodicCheck();
-    });
-
-    self.addEventListener('offline', () => {
-        console.log('Network connection lost');
-        networkRetryTimeout = setTimeout(() => {
-            startPeriodicCheck();
-        }, 5000);
-    });
-}
 
 async function startPeriodicCheck() {
     try {
         const token = await login();
         console.log('Periodic check started');
         
+        let consecutiveFailures = 0;
+        const maxFailures = 3;
+        
         const checkInterval = 20000;
         const periodicCheck = async () => {
             if (navigator.onLine) {
                 try {
                     await checkNewOrders(token);
+                    consecutiveFailures = 0;
                 } catch (error) {
-                    console.log('Check failed, retrying with new token...');
-                    const newToken = await login();
-                    await checkNewOrders(newToken);
+                    consecutiveFailures++;
+                    console.log(`Check failed (${consecutiveFailures}/${maxFailures}), retrying...`);
+                    
+                    if (consecutiveFailures >= maxFailures) {
+                        console.log('Multiple failures, refreshing login');
+                        const newToken = await login();
+                        await checkNewOrders(newToken);
+                        consecutiveFailures = 0;
+                    }
                 }
             }
             setTimeout(periodicCheck, checkInterval);
@@ -275,7 +313,6 @@ async function startPeriodicCheck() {
         
         periodicCheck();
         verifyServiceWorkerActive();
-        handleNetworkChange();
     } catch (error) {
         console.log('Service Worker check failed, restarting...');
         setTimeout(startPeriodicCheck, 5000);
@@ -334,3 +371,6 @@ self.addEventListener('notificationclick', event => {
 setInterval(() => {
     self.registration.update();
 }, 10 * 60 * 1000);
+
+setInterval(verifyCredentials, 60000);
+
