@@ -42,6 +42,14 @@ let isChecking = false;
 let wakeLock = null;
 let networkRetryTimeout;
 
+async function refreshToken() {
+    const newToken = await login();
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    await cache.put('auth-token', new Response(newToken));
+    return newToken;
+}
+
+
 function ensureNetworkRecovery() {
     setInterval(() => {
         if (navigator.onLine) {
@@ -292,31 +300,41 @@ async function checkNewOrders(token) {
     isChecking = true;
     
     try {
+        // First verify the token is valid
+        const tokenVerified = await verifyCredentials();
+        const useToken = tokenVerified || token;
+        
         const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
             method: 'POST',
             headers: {
                 'accept': 'application/json',
-                'authorizationcode': token,
+                'authorizationcode': useToken,
                 'content-type': 'application/json',
                 'referer': 'https://portal.ghazaresan.com/',
                 'securitykey': securityKey,
             },
             body: JSON.stringify({}),
-            // Add timeout
             signal: AbortSignal.timeout(30000)
         });
+
+        if (response.status === 401) {
+            // Token expired, get new one
+            const newToken = await login();
+            return checkNewOrders(newToken);
+        }
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const responseData = await response.json();
+        if (Array.isArray(responseData)) {
+            const newOrders = responseData.filter(order => order.Status === 0);
+            if (newOrders.length > 0) {
+                await showNewOrderNotification(newOrders.length);
+            }
+        }
         return responseData;
-    } catch (error) {
-        console.log('Check orders failed:', error);
-        // Force token refresh on error
-        await login();
-        throw error;
     } finally {
         isChecking = false;
     }
@@ -326,7 +344,7 @@ async function startPeriodicCheck() {
     if (!navigator.onLine) return;
     
     try {
-        const token = await verifyCredentials();
+        let token = await verifyCredentials();
         console.log('Periodic check started');
         
         const checkInterval = setInterval(async () => {
@@ -338,8 +356,9 @@ async function startPeriodicCheck() {
             try {
                 await checkNewOrders(token);
             } catch (error) {
-                const newToken = await verifyCredentials();
-                await checkNewOrders(newToken);
+                if (error.message.includes('401')) {
+                    token = await refreshToken();
+                }
             }
         }, ORDER_CHECK_INTERVAL);
         
@@ -347,6 +366,7 @@ async function startPeriodicCheck() {
         setTimeout(startPeriodicCheck, 5000);
     }
 }
+
 
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing.');
