@@ -239,41 +239,39 @@ function createBackupLoop() {
 }
 
 async function login() {
-    if (!credentials?.username || !credentials?.password) {
-        throw new Error('Invalid credentials format');
+    if (!credentials?.username || !credentials?.password || !securityKey) {
+        throw new Error('Missing credentials');
     }
-    return retryWithBackoff(async () => {
-        const response = await fetch(`${API_BASE_URL}/api/Authorization/Authenticate`, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'SecurityKey': securityKey,
-                'Referer': 'https://portal.ghazaresan.com/'
-            },
-            body: JSON.stringify({
-                UserName: credentials.username,
-                Password: credentials.password
-            })
-        });
-        if (!response.ok) {
-            throw new Error(`Login failed with status: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        if (!data.Token) {
-            throw new Error('No token received in response');
-        }
-        const cache = await caches.open(AUTH_CACHE_NAME);
-        await Promise.all([
-            cache.put('auth-token', new Response(data.Token)),
-            cache.put('restaurant-info', new Response(JSON.stringify({
-                name: data.RestaurantName,
-                canEditMenu: data.CanEditMenu
-            })))
-        ]);
-        return data.Token;
+
+    const response = await fetch(`${API_BASE_URL}/api/Authorization/Authenticate`, {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'SecurityKey': securityKey,
+            'Referer': 'https://portal.ghazaresan.com/'
+        },
+        body: JSON.stringify({
+            UserName: credentials.username,
+            Password: credentials.password
+        })
     });
+
+    if (!response.ok) {
+        const cache = await caches.open(AUTH_CACHE_NAME);
+        await cache.delete('auth-token');
+        throw new Error(`Login failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!data.Token) {
+        throw new Error('No token received');
+    }
+
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    await cache.put('auth-token', new Response(data.Token));
+    
+    return data.Token;
 }
 
 async function showNewOrderNotification(orderCount) {
@@ -387,13 +385,15 @@ self.addEventListener('message', event => {
             password: event.data.password
         };
         securityKey = event.data.securityKey;
-        startPeriodicCheck();
-    } else if (event.data.type === KEEP_ALIVE_PING) {
-        console.log('Keep-alive ping received');
-    } else if (event.data.type === 'FORCE_CHECK') {
-        startPeriodicCheck();
+        
+        login().then(() => {
+            startPeriodicCheck();
+        }).catch(error => {
+            console.error('Initial login failed:', error);
+        });
     }
 });
+
 
 self.addEventListener('notificationclick', event => {
     event.notification.close();
