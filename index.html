@@ -22,35 +22,46 @@
         
         async function requestWakeLock() {
             try {
-                wakeLock = await navigator.wakeLock.request('screen');
-                wakeLock.addEventListener('release', () => {
-                    console.log('Wake Lock released');
-                    requestWakeLock();
-                });
+                if (document.visibilityState === 'visible') {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock acquired');
+                }
             } catch (err) {
-                console.log('Wake Lock error:', err);
+                console.log('Wake Lock attempt - will retry when page becomes visible');
             }
         }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
 
         async function registerBackgroundSync() {
             const registration = await navigator.serviceWorker.ready;
             
             if ('periodicSync' in registration) {
                 try {
-                    await registration.periodicSync.register('background-sync', {
-                        minInterval: 1000 * 60 * 15
+                    const status = await navigator.permissions.query({
+                        name: 'periodic-background-sync',
                     });
+                    
+                    if (status.state === 'granted') {
+                        await registration.periodicSync.register('background-sync', {
+                            minInterval: 1000 * 60 * 15
+                        });
+                        console.log('Periodic sync registered successfully');
+                    } else {
+                        console.log('Periodic sync permission not granted, falling back to regular sync');
+                        await registration.sync.register('check-orders');
+                    }
                 } catch (error) {
-                    console.log('Periodic background sync failed, retrying...');
-                    setTimeout(() => registerBackgroundSync(), 5000);
+                    console.log('Using fallback sync mechanism');
+                    await registration.sync.register('check-orders');
                 }
-            }
-            
-            try {
+            } else {
+                console.log('Periodic sync not supported, using regular sync');
                 await registration.sync.register('check-orders');
-            } catch (error) {
-                console.log('Background sync registration failed, retrying...');
-                setTimeout(() => registration.sync.register('check-orders'), 5000);
             }
         }
 
