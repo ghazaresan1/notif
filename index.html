@@ -181,26 +181,34 @@ window.addEventListener('focus', async () => {
 <body>
     <h1>Restaurant Order Management</h1>
     
-    <form id="loginForm">
-        <div>
-            <label for="username">Username:</label>
-            <input type="text" id="username" required>
-        </div>
-        <div>
-            <label for="password">Password:</label>
-            <input type="password" id="password" required>
-        </div>
-       <div>
-    <label for="securityKey">Security Key:</label>
-    <input type="password" 
-           id="securityKey" 
-           name="securityKey"
-           autocomplete="current-password"
-           required>
-</div>
-
+ <form id="loginForm" autocomplete="on">
+    <div>
+        <label for="username">Username:</label>
+        <input type="text" 
+               id="username" 
+               name="username"
+               autocomplete="username" 
+               required>
+    </div>
+    <div>
+        <label for="password">Password:</label>
+        <input type="password" 
+               id="password"
+               name="password" 
+               autocomplete="current-password"
+               required>
+    </div>
+    <div>
+        <label for="securityKey">Security Key:</label>
+        <input type="password" 
+               id="securityKey" 
+               name="securityKey"
+               autocomplete="off"
+               required>
+    </div>
         <button type="submit">Login</button>
-    </form>
+</form>
+
     <div id="loggedInMessage" style="display: none;">
         <p>Successfully logged in! The app is running in the background.</p>
         <button id="logoutButton">Logout</button>
