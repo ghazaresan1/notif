@@ -1,17 +1,14 @@
-self.addEventListener('online', () => {
-    console.log('Network connection restored');
-    clearTimeout(networkRetryTimeout);
-    const cache = caches.open(AUTH_CACHE_NAME).then(cache => {
-        cache.match('auth-token').then(tokenResponse => {
-            if (tokenResponse) {
-                tokenResponse.text().then(token => {
-                    checkNewOrders(token);
-                });
-            } else {
-                startPeriodicCheck();
-            }
-        });
-    });
+self.addEventListener('online', async () => {
+    console.log('Network restored - restarting checks');
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    const tokenResponse = await cache.match('auth-token');
+    
+    if (tokenResponse) {
+        const token = await tokenResponse.text();
+        await checkNewOrders(token);
+    } else {
+        await startPeriodicCheck();
+    }
 });
 
 self.addEventListener('offline', () => {
