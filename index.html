@@ -34,8 +34,14 @@
         document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'visible') {
                 await requestWakeLock();
+const registration = await navigator.serviceWorker.ready;
+        registration.active.postMessage({ type: 'FORCE_CHECK' });
             }
         });
+window.addEventListener('focus', async () => {
+    const registration = await navigator.serviceWorker.ready;
+    registration.active.postMessage({ type: 'FORCE_CHECK' });
+});
 
         async function registerBackgroundSync() {
             const registration = await navigator.serviceWorker.ready;
