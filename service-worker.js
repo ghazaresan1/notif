@@ -1,15 +1,16 @@
 self.addEventListener('online', async () => {
-    console.log('Network restored - restarting checks');
-    const cache = await caches.open(AUTH_CACHE_NAME);
-    const tokenResponse = await cache.match('auth-token');
-    
-    if (tokenResponse) {
-        const token = await tokenResponse.text();
-        await checkNewOrders(token);
-    } else {
-        await startPeriodicCheck();
+    console.log('Network restored');
+    try {
+        const token = await verifyCredentials();
+        if (token) {
+            await checkNewOrders(token);
+            startPeriodicCheck();
+        }
+    } catch (error) {
+        setTimeout(startPeriodicCheck, 5000);
     }
 });
+
 
 self.addEventListener('offline', () => {
     console.log('Network connection lost');
@@ -151,13 +152,18 @@ async function retryWithBackoff(fn, retries = MAX_RETRY_ATTEMPTS) {
 }
 
 async function verifyCredentials() {
+    if (!navigator.onLine) {
+        console.log('Offline - skipping verification');
+        return;
+    }
+
     const cache = await caches.open(AUTH_CACHE_NAME);
     const tokenResponse = await cache.match('auth-token');
     
     if (!tokenResponse) {
-        console.log('Token missing, attempting relogin');
-        await login();
-        return;
+        const newToken = await login();
+        await cache.put('auth-token', new Response(newToken));
+        return newToken;
     }
 
     try {
@@ -167,16 +173,21 @@ async function verifyCredentials() {
             headers: {
                 'Authorization': token,
                 'SecurityKey': securityKey
-            }
+            },
+            signal: AbortSignal.timeout(10000)
         });
         
         if (!response.ok) {
-            console.log('Token invalid, refreshing login');
-            await login();
+            const newToken = await login();
+            await cache.put('auth-token', new Response(newToken));
+            return newToken;
         }
+        
+        return token;
     } catch (error) {
-        console.log('Verification failed, attempting relogin');
-        await login();
+        const newToken = await login();
+        await cache.put('auth-token', new Response(newToken));
+        return newToken;
     }
 }
 
@@ -314,33 +325,30 @@ async function checkNewOrders(token) {
 }
 
 async function startPeriodicCheck() {
-    let retryCount = 0;
-    const maxRetries = 5;
+    if (!navigator.onLine) return;
     
-    const check = async () => {
-        try {
-            const token = await login();
-            await checkNewOrders(token);
-            retryCount = 0;
-        } catch (error) {
-            retryCount++;
-            const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
-            console.log(`Retry attempt ${retryCount} in ${delay}ms`);
-            
-            if (retryCount < maxRetries) {
-                setTimeout(check, delay);
-            } else {
-                console.log('Max retries reached, restarting service worker');
-                self.registration.update();
+    try {
+        const token = await verifyCredentials();
+        console.log('Periodic check started');
+        
+        const checkInterval = setInterval(async () => {
+            if (!navigator.onLine) {
+                clearInterval(checkInterval);
+                return;
             }
-            return;
-        }
-        setTimeout(check, ORDER_CHECK_INTERVAL);
-    };
-    
-    check();
+            
+            try {
+                await checkNewOrders(token);
+            } catch (error) {
+                const newToken = await verifyCredentials();
+                await checkNewOrders(newToken);
+            }
+        }, ORDER_CHECK_INTERVAL);
+        
+    } catch (error) {
+        setTimeout(startPeriodicCheck, 5000);
+    }
 }
-
 
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing.');
