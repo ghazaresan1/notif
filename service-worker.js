@@ -1,8 +1,17 @@
-// Network event handlers at the top level
 self.addEventListener('online', () => {
     console.log('Network connection restored');
     clearTimeout(networkRetryTimeout);
-    startPeriodicCheck();
+    const cache = caches.open(AUTH_CACHE_NAME).then(cache => {
+        cache.match('auth-token').then(tokenResponse => {
+            if (tokenResponse) {
+                tokenResponse.text().then(token => {
+                    checkNewOrders(token);
+                });
+            } else {
+                startPeriodicCheck();
+            }
+        });
+    });
 });
 
 self.addEventListener('offline', () => {
@@ -30,6 +39,14 @@ let securityKey = null;
 let isChecking = false;
 let wakeLock = null;
 let networkRetryTimeout;
+
+function ensureNetworkRecovery() {
+    setInterval(() => {
+        if (navigator.onLine) {
+            startPeriodicCheck();
+        }
+    }, 30000);
+}
 
 class WakeLockManager {
     constructor() {
@@ -333,6 +350,7 @@ self.addEventListener('activate', event => {
         startWatchdog();
         ensurePersistentOperation();
         startKeepAlive();
+        ensureNetworkRecovery();
     })());
 });
 
@@ -358,6 +376,8 @@ self.addEventListener('message', event => {
         startPeriodicCheck();
     } else if (event.data.type === KEEP_ALIVE_PING) {
         console.log('Keep-alive ping received');
+    } else if (event.data.type === 'FORCE_CHECK') {
+        startPeriodicCheck();
     }
 });
 
@@ -373,4 +393,3 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 setInterval(verifyCredentials, 60000);
-
