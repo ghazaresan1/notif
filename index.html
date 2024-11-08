@@ -149,6 +149,11 @@ window.addEventListener('focus', async () => {
             document.getElementById('securityKey').value = '';
             window.location.reload();
         });
+        window.addEventListener('online', async () => {
+    const registration = await navigator.serviceWorker.ready;
+    registration.active.postMessage({ type: 'FORCE_CHECK' });
+});
+
 
         window.addEventListener('load', async () => {
             const username = localStorage.getItem('username');
