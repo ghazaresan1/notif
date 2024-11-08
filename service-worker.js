@@ -33,6 +33,10 @@ const HEARTBEAT_INTERVAL = 30000;
 const PING_INTERVAL = 15000;
 const WATCHDOG_INTERVAL = 45000;
 const HEALTH_CHECK_INTERVAL = 35000;
+const FETCH_TIMEOUT = 30000;
+const MAX_RETRIES = 5;
+const MIN_RETRY_DELAY = 1000;
+const MAX_RETRY_DELAY = 30000;
 
 let credentials = null;
 let securityKey = null;
@@ -103,20 +107,31 @@ function startWatchdog() {
 
 function enhancedKeepAlive() {
     setInterval(async () => {
-        const cache = await caches.open(AUTH_CACHE_NAME);
-        await cache.put('keepalive', new Response(Date.now().toString()));
-        self.registration.active?.postMessage({ type: 'HEARTBEAT' });
+        if (!navigator.onLine) return;
         
         try {
+            const cache = await caches.open(AUTH_CACHE_NAME);
+            const tokenResponse = await cache.match('auth-token');
+            
+            if (!tokenResponse) {
+                await login();
+                return;
+            }
+
+            const token = await tokenResponse.text();
             const response = await fetch(`${API_BASE_URL}/health`, {
                 method: 'GET',
-                headers: { 'Cache-Control': 'no-cache' }
+                headers: {
+                    'Authorization': token,
+                    'Cache-Control': 'no-cache'
+                },
+                signal: AbortSignal.timeout(10000)
             });
+
             if (!response.ok) {
                 await startPeriodicCheck();
             }
         } catch (error) {
-            console.log('Health check failed, restarting services...');
             await startPeriodicCheck();
         }
     }, PING_INTERVAL);
@@ -271,70 +286,64 @@ async function checkNewOrders(token) {
     isChecking = true;
     
     try {
-        return await retryWithBackoff(async () => {
-            const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
-                method: 'POST',
-                headers: {
-                    'accept': 'application/json',
-                    'authorizationcode': token,
-                    'content-type': 'application/json',
-                    'referer': 'https://portal.ghazaresan.com/',
-                    'securitykey': securityKey,
-                },
-                body: JSON.stringify({})
-            });
-            const responseData = await response.json();
-            
-            if (Array.isArray(responseData)) {
-                const newOrders = responseData.filter(order => order.Status === 0);
-                if (newOrders.length > 0) {
-                    await showNewOrderNotification(newOrders.length);
-                }
-            }
-            
-            return responseData;
+        const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'authorizationcode': token,
+                'content-type': 'application/json',
+                'referer': 'https://portal.ghazaresan.com/',
+                'securitykey': securityKey,
+            },
+            body: JSON.stringify({}),
+            // Add timeout
+            signal: AbortSignal.timeout(30000)
         });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const responseData = await response.json();
+        return responseData;
+    } catch (error) {
+        console.log('Check orders failed:', error);
+        // Force token refresh on error
+        await login();
+        throw error;
     } finally {
         isChecking = false;
     }
 }
 
 async function startPeriodicCheck() {
-    try {
-        const token = await login();
-        console.log('Periodic check started');
-        
-        let consecutiveFailures = 0;
-        const maxFailures = 3;
-        
-        const checkInterval = 20000;
-        const periodicCheck = async () => {
-            if (navigator.onLine) {
-                try {
-                    await checkNewOrders(token);
-                    consecutiveFailures = 0;
-                } catch (error) {
-                    consecutiveFailures++;
-                    console.log(`Check failed (${consecutiveFailures}/${maxFailures}), retrying...`);
-                    
-                    if (consecutiveFailures >= maxFailures) {
-                        console.log('Multiple failures, refreshing login');
-                        const newToken = await login();
-                        await checkNewOrders(newToken);
-                        consecutiveFailures = 0;
-                    }
-                }
+    let retryCount = 0;
+    const maxRetries = 5;
+    
+    const check = async () => {
+        try {
+            const token = await login();
+            await checkNewOrders(token);
+            retryCount = 0;
+        } catch (error) {
+            retryCount++;
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+            console.log(`Retry attempt ${retryCount} in ${delay}ms`);
+            
+            if (retryCount < maxRetries) {
+                setTimeout(check, delay);
+            } else {
+                console.log('Max retries reached, restarting service worker');
+                self.registration.update();
             }
-            setTimeout(periodicCheck, checkInterval);
-        };
-        
-        periodicCheck();
-        verifyServiceWorkerActive();
-    } catch (error) {
-        console.log('Service Worker check failed, restarting...');
-        setTimeout(startPeriodicCheck, 5000);
-    }
+            return;
+        }
+        setTimeout(check, ORDER_CHECK_INTERVAL);
+    };
+    
+    check();
 }
+
 
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing.');
