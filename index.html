@@ -119,6 +119,20 @@ window.addEventListener('focus', async () => {
             securityKey: securityKey
         }
     });
+if (window.PasswordCredential) {
+    navigator.credentials.get({
+        password: true,
+        mediation: 'optional'
+    }).then(cred => {
+        if (cred) {
+            document.getElementById('username').value = cred.id;
+            document.getElementById('password').value = cred.password;
+            if (cred.additionalData) {
+                document.getElementById('securityKey').value = cred.additionalData.securityKey;
+            }
+        }
+    });
+}
     await navigator.credentials.store(cred);
 }
 
@@ -181,7 +195,7 @@ window.addEventListener('focus', async () => {
 <body>
     <h1>Restaurant Order Management</h1>
     
- <form id="loginForm" autocomplete="on">
+<form id="loginForm" autocomplete="on">
     <div>
         <label for="username">Username:</label>
         <input type="text" 
@@ -202,11 +216,11 @@ window.addEventListener('focus', async () => {
         <label for="securityKey">Security Key:</label>
         <input type="password" 
                id="securityKey" 
-               name="securityKey"
-               autocomplete="off"
+               name="security-key"
+               autocomplete="new-password"
                required>
     </div>
-        <button type="submit">Login</button>
+    <button type="submit">Login</button>
 </form>
 
     <div id="loggedInMessage" style="display: none;">
