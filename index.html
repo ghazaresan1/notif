@@ -111,14 +111,17 @@ window.addEventListener('focus', async () => {
             
             await navigator.credentials.preventSilentAccess();
             
-            if (window.PasswordCredential) {
-                const cred = new PasswordCredential({
-                    id: username,
-                    password: password,
-                    additionalData: securityKey
-                });
-                await navigator.credentials.store(cred);
-            }
+         if (window.PasswordCredential) {
+    const cred = new PasswordCredential({
+        id: username,
+        password: password,
+        additionalData: {
+            securityKey: securityKey
+        }
+    });
+    await navigator.credentials.store(cred);
+}
+
             
             localStorage.setItem('username', username);
             localStorage.setItem('password', password);
@@ -182,10 +185,15 @@ window.addEventListener('focus', async () => {
             <label for="password">Password:</label>
             <input type="password" id="password" required>
         </div>
-        <div>
-            <label for="securityKey">Security Key:</label>
-            <input type="password" id="securityKey" required>
-        </div>
+       <div>
+    <label for="securityKey">Security Key:</label>
+    <input type="password" 
+           id="securityKey" 
+           name="securityKey"
+           autocomplete="current-password"
+           required>
+</div>
+
         <button type="submit">Login</button>
     </form>
     <div id="loggedInMessage" style="display: none;">
