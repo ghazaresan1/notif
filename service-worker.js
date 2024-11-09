@@ -1,24 +1,3 @@
-self.addEventListener('online', async () => {
-    console.log('Network restored');
-    try {
-        const token = await verifyCredentials();
-        if (token) {
-            await checkNewOrders(token);
-            startPeriodicCheck();
-        }
-    } catch (error) {
-        setTimeout(startPeriodicCheck, 5000);
-    }
-});
-
-
-self.addEventListener('offline', () => {
-    console.log('Network connection lost');
-    networkRetryTimeout = setTimeout(() => {
-        startPeriodicCheck();
-    }, 5000);
-});
-
 const KEEP_ALIVE_PING = 'keep-alive';
 const AUTH_CACHE_NAME = 'auth-cache';
 const API_BASE_URL = 'https://app.ghazaresan.com';
@@ -42,13 +21,33 @@ let isChecking = false;
 let wakeLock = null;
 let networkRetryTimeout;
 
+async function storeCredentials(username, password, key) {
+    credentials = { username, password };
+    securityKey = key;
+    
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    await cache.put('stored-credentials', new Response(JSON.stringify({
+        credentials,
+        securityKey
+    })));
+}
+
+async function loadStoredCredentials() {
+    const cache = await caches.open(AUTH_CACHE_NAME);
+    const stored = await cache.match('stored-credentials');
+    if (stored) {
+        const data = await stored.json();
+        credentials = data.credentials;
+        securityKey = data.securityKey;
+    }
+}
+
 async function refreshToken() {
     const newToken = await login();
     const cache = await caches.open(AUTH_CACHE_NAME);
     await cache.put('auth-token', new Response(newToken));
     return newToken;
 }
-
 
 function ensureNetworkRecovery() {
     setInterval(() => {
@@ -111,6 +110,28 @@ function startWatchdog() {
     }, WATCHDOG_INTERVAL);
 }
 
+function startHealthCheck() {
+    setInterval(async () => {
+        if (!navigator.onLine) return;
+        
+        try {
+            await loadStoredCredentials();
+            if (!credentials || !securityKey) {
+                throw new Error('Credentials missing');
+            }
+            
+            const token = await verifyCredentials();
+            if (!token) {
+                await login();
+                await startPeriodicCheck();
+            }
+        } catch (error) {
+            console.log('Health check failed, attempting recovery...');
+            await startPeriodicCheck();
+        }
+    }, HEALTH_CHECK_INTERVAL);
+}
+
 function enhancedKeepAlive() {
     setInterval(async () => {
         if (!navigator.onLine) return;
@@ -123,7 +144,6 @@ function enhancedKeepAlive() {
                 await login();
                 return;
             }
-
             const token = await tokenResponse.text();
             const response = await fetch(`${API_BASE_URL}/health`, {
                 method: 'GET',
@@ -133,7 +153,6 @@ function enhancedKeepAlive() {
                 },
                 signal: AbortSignal.timeout(10000)
             });
-
             if (!response.ok) {
                 await startPeriodicCheck();
             }
@@ -164,7 +183,6 @@ async function verifyCredentials() {
         console.log('Offline - skipping verification');
         return;
     }
-
     const cache = await caches.open(AUTH_CACHE_NAME);
     const tokenResponse = await cache.match('auth-token');
     
@@ -173,7 +191,6 @@ async function verifyCredentials() {
         await cache.put('auth-token', new Response(newToken));
         return newToken;
     }
-
     try {
         const token = await tokenResponse.text();
         const response = await fetch(`${API_BASE_URL}/api/Authorization/Verify`, {
@@ -250,7 +267,6 @@ async function login() {
     if (!credentials?.username || !credentials?.password || !securityKey) {
         throw new Error('Missing credentials');
     }
-
     const response = await fetch(`${API_BASE_URL}/api/Authorization/Authenticate`, {
         method: 'POST',
         headers: {
@@ -264,18 +280,15 @@ async function login() {
             Password: credentials.password
         })
     });
-
     if (!response.ok) {
         const cache = await caches.open(AUTH_CACHE_NAME);
         await cache.delete('auth-token');
         throw new Error(`Login failed: ${response.status}`);
     }
-
     const data = await response.json();
     if (!data.Token) {
         throw new Error('No token received');
     }
-
     const cache = await caches.open(AUTH_CACHE_NAME);
     await cache.put('auth-token', new Response(data.Token));
     
@@ -300,7 +313,6 @@ async function checkNewOrders(token) {
     isChecking = true;
     
     try {
-        // First verify the token is valid
         const tokenVerified = await verifyCredentials();
         const useToken = tokenVerified || token;
         
@@ -316,13 +328,10 @@ async function checkNewOrders(token) {
             body: JSON.stringify({}),
             signal: AbortSignal.timeout(30000)
         });
-
         if (response.status === 401) {
-            // Token expired, get new one
             const newToken = await login();
             return checkNewOrders(newToken);
         }
-
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -367,7 +376,6 @@ async function startPeriodicCheck() {
     }
 }
 
-
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing.');
     self.skipWaiting();
@@ -376,6 +384,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', event => {
     event.waitUntil((async () => {
         await clients.claim();
+        await loadStoredCredentials();
+        
         createWakeLoop();
         createBackupLoop();
         enhancedKeepAlive();
@@ -383,6 +393,11 @@ self.addEventListener('activate', event => {
         ensurePersistentOperation();
         startKeepAlive();
         ensureNetworkRecovery();
+        startHealthCheck();
+        
+        if (credentials && securityKey) {
+            await startPeriodicCheck();
+        }
     })());
 });
 
@@ -398,7 +413,7 @@ self.addEventListener('periodicsync', (event) => {
     }
 });
 
-self.addEventListener('message', event => {
+self.addEventListener('message', async event => {
     if (event.data.type === 'CREDENTIALS') {
         credentials = {
             username: event.data.username,
