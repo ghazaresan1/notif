@@ -313,8 +313,7 @@ async function checkNewOrders(token) {
     isChecking = true;
     
     try {
-        const tokenVerified = await verifyCredentials();
-        const useToken = tokenVerified || token;
+        const useToken = token || await verifyCredentials();
         
         const response = await fetch(`${API_BASE_URL}/api/Orders/GetOrders`, {
             method: 'POST',
@@ -326,13 +325,14 @@ async function checkNewOrders(token) {
                 'securitykey': securityKey,
             },
             body: JSON.stringify({}),
-            signal: AbortSignal.timeout(30000)
+            signal: AbortSignal.timeout(15000) // Reduced timeout
         });
-        if (response.status === 401) {
-            const newToken = await login();
-            return checkNewOrders(newToken);
-        }
+
         if (!response.ok) {
+            if (response.status === 401) {
+                const newToken = await login();
+                return checkNewOrders(newToken);
+            }
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
@@ -343,38 +343,46 @@ async function checkNewOrders(token) {
                 await showNewOrderNotification(newOrders.length);
             }
         }
-        return responseData;
+    } catch (error) {
+        console.error('Check orders failed:', error);
+        // Force token refresh on next check
+        const cache = await caches.open(AUTH_CACHE_NAME);
+        await cache.delete('auth-token');
     } finally {
         isChecking = false;
     }
 }
 
-async function startPeriodicCheck() {
-    if (!navigator.onLine) return;
+function startPeriodicCheck() {
+    let checkInterval;
     
-    try {
-        let token = await verifyCredentials();
-        console.log('Periodic check started');
+    async function runCheck() {
+        if (!navigator.onLine) return;
         
-        const checkInterval = setInterval(async () => {
-            if (!navigator.onLine) {
-                clearInterval(checkInterval);
-                return;
-            }
-            
-            try {
-                await checkNewOrders(token);
-            } catch (error) {
-                if (error.message.includes('401')) {
-                    token = await refreshToken();
-                }
-            }
-        }, ORDER_CHECK_INTERVAL);
-        
-    } catch (error) {
-        setTimeout(startPeriodicCheck, 5000);
+        try {
+            const token = await verifyCredentials();
+            await checkNewOrders(token);
+        } catch (error) {
+            console.error('Periodic check failed:', error);
+        }
     }
+
+    // Clear any existing interval
+    if (checkInterval) clearInterval(checkInterval);
+    
+    // Initial check
+    runCheck();
+    
+    // Set new interval
+    checkInterval = setInterval(runCheck, 20000);
+    
+    // Add backup interval
+    setInterval(() => {
+        if (!isChecking) runCheck();
+    }, 30000);
 }
+
+
 
 self.addEventListener('install', (event) => {
     console.log('Service Worker installing.');
@@ -401,17 +409,6 @@ self.addEventListener('activate', event => {
     })());
 });
 
-self.addEventListener('sync', (event) => {
-    if (event.tag === 'check-orders') {
-        event.waitUntil(checkNewOrders());
-    }
-});
-
-self.addEventListener('periodicsync', (event) => {
-    if (event.tag === 'background-sync') {
-        event.waitUntil(checkNewOrders());
-    }
-});
 
 self.addEventListener('message', async event => {
     if (event.data.type === 'CREDENTIALS') {
@@ -421,20 +418,23 @@ self.addEventListener('message', async event => {
         };
         securityKey = event.data.securityKey;
         
-        login().then(() => {
+        try {
+            await login();
             startPeriodicCheck();
-        }).catch(error => {
+        } catch (error) {
             console.error('Initial login failed:', error);
-        });
+        }
     }
 });
-
 
 self.addEventListener('notificationclick', event => {
     event.notification.close();
     event.waitUntil(
         clients.openWindow('https://portal.ghazaresan.com/orderlist')
     );
+});
+self.addEventListener('online', () => {
+    startPeriodicCheck();
 });
 
 setInterval(() => {
